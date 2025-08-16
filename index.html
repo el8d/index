@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https://opensky-network.org https://api.allorigins.win https://cors.isomorphic-git.org https://unpkg.com https://cdn.jsdelivr.net; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; upgrade-insecure-requests;">
+  <meta name="referrer" content="no-referrer" />
+  <title>usaflights.com</title>
+  <!-- Baseline: v1.0 (fixes script errors, defaults to US, adds trails, size chart, sorted carriers) -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <style>
+    :root{ --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .wrap{display:grid;grid-template-columns: 1.8fr 1fr; gap:14px; height:100vh; padding:14px; box-sizing:border-box}
+    header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--panel);border-radius:12px;box-shadow:0 0 0 1px rgba(255,255,255,0.06) inset}
+    header h1{font-size:18px;margin:0}
+    header .right{display:flex;gap:10px;align-items:center}
+    .badge{font-size:12px;color:#0a0a0a;background:var(--accent);padding:4px 8px;border-radius:999px;font-weight:700}
+    .controls{display:flex;gap:8px}
+    .btn{background:#1f2937;border:1px solid rgba(255,255,255,0.08);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
+    .btn:hover{filter:brightness(1.15)}
+    .toggles{display:flex;gap:12px;align-items:center;margin-left:8px}
+    .toggles label{font-size:12px;color:var(--muted)}
+    .statgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
+    .card{background:var(--panel);border-radius:12px;padding:10px;box-shadow:0 0 0 1px rgba(255,255,255,0.06) inset}
+    .kpi{font-size:26px;font-weight:700}
+    .sub{font-size:12px;color:var(--muted)}
+    .map{height:calc(100vh - 260px);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);position:relative}
+    .legend{position:absolute;left:8px;top:8px;background:#0b1220cc;border:1px solid rgba(255,255,255,0.06);padding:6px 8px;border-radius:8px;font-size:12px;color:var(--text);z-index:500}
+    .legend div{display:flex;align-items:center;gap:6px;margin:2px 0}
+    .legend .sw{display:inline-block;width:14px;height:14px;border-radius:50%}
+    .legend .low{background:#22c55e}.legend .med{background:#f59e0b}.legend .high{background:#ef4444}
+    .arrow{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid #ffffff;opacity:.95;transform-origin:50% 60%;}
+    .rightcol{display:grid;grid-template-rows:220px 220px 1fr;gap:10px}
+    .chartCard{height:220px}.chartCard canvas{width:100% !important;height:100% !important;}
+    .row{display:flex;gap:10px}.mini{flex:1}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px}
+    th{color:var(--muted);text-align:left} tbody tr:hover{background:#0b1220}
+    .pill{font-size:11px;padding:3px 6px;border-radius:999px;background:#0b1220;border:1px solid rgba(255,255,255,0.06)}
+    .footer{grid-column:1/-1;color:var(--muted);font-size:11px;text-align:center}
+    .statusbar{display:flex;gap:10px;align-items:center}
+    .dot{width:10px;height:10px;border-radius:999px;display:inline-block}
+    .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+    .searchbar{display:flex;gap:8px}
+    input[type="text"], select{background:#0b1220;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px 10px;border-radius:10px;outline:none;width:100%}
+    .nowrap{white-space:nowrap}
+    @media (max-width:1100px){.wrap{grid-template-columns:1fr}.map{height:60vh}.rightcol{grid-template-rows:auto auto auto}.statgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>usaflights.com</h1>
+      <div class="right">
+        <div class="statusbar"><span id="conn-dot" class="dot warn" title="Status"></span><span id="status">Initialising…</span></div>
+        <div class="toggles"><label><input type="checkbox" id="toggleAircraft" checked> Aircraft</label><label><input type="checkbox" id="toggleAirports" checked> Airport traffic</label></div>
+        <span class="badge" title="Build version">v1.0</span>
+      </div>
+    </header>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="row" style="align-items:center;justify-content:space-between;gap:10px">
+        <div class="searchbar" style="flex:1">
+          <input id="search" type="text" placeholder="Search callsign (e.g., AAL, UAL123)" />
+          <select id="continent">
+            <option value="ALL">All continents (worldwide)</option>
+            <option value="NA" selected>North America</option>
+            <option value="SA">South America</option>
+            <option value="EU">Europe</option>
+            <option value="AF">Africa</option>
+            <option value="AS">Asia</option>
+            <option value="OC">Oceania</option>
+          </select>
+          <select id="carrier"><option value="ALL">All carriers</option></select>
+        </div>
+        <div class="controls">
+          <button class="btn" id="refreshBtn">Refresh now</button>
+        </div>
+      </div>
+
+      <div class="statgrid">
+        <div class="card mini"><div class="sub" id="kpi-scope-label">Airborne worldwide</div><div id="kpi-total" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">Avg Altitude (ft)</div><div id="kpi-alt" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">Avg Speed (kt)</div><div id="kpi-spd" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">Climb / Level / Descend</div><div id="kpi-vr" class="kpi">–</div></div>
+      </div>
+      <div class="statgrid">
+        <div class="card mini"><div class="sub">Median Alt (ft)</div><div id="kpi-medalt" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">Median Spd (kt)</div><div id="kpi-medspd" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">US‑registered / Other</div><div id="kpi-regsplit" class="kpi">–</div></div>
+        <div class="card mini"><div class="sub">Eastbound / Westbound</div><div id="kpi-ew" class="kpi">–</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div id="map" class="map">
+        <div class="legend">
+          <div><strong>Airport Traffic (≈ within 50 km)</strong></div>
+          <div><span class="sw low"></span> Low (&le; 5)</div>
+          <div><span class="sw med"></span> Medium (6–15)</div>
+          <div><span class="sw high"></span> High (&ge; 16)</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="rightcol">
+      <div class="card chartCard"><div class="sub">Aircraft Size (approx)</div><canvas id="sizeChart"></canvas></div>
+      <div class="card chartCard"><div class="sub">Top Carriers (by callsign prefix)</div><canvas id="carrierChart"></canvas></div>
+      <div class="card" style="overflow:auto">
+        <div class="row" style="justify-content:space-between;align-items:center"><div class="sub">Sample Flights (filtered)</div><div class="sub nowrap">Last update: <span id="lastUpdate">–</span></div></div>
+        <table><thead><tr><th>Callsign</th><th>ICAO 24-bit</th><th>Country</th><th>Alt (ft)</th><th>Spd (kt)</th><th>VR (fpm)</th><th>Hdg (°)</th><th>Region</th></tr></thead><tbody id="rows"></tbody></table>
+      </div>
+    </aside>
+
+    <div class="footer">Data from OpenSky Network public states (ADS-B). Coverage varies; counts are approximate. Map © OpenStreetMap contributors.</div>
+  </div>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <script>
+    // ====== Config ======
+    const API_URL = 'https://opensky-network.org/api/states/all';
+    const REFRESH_MS = 60_000; // 1 minute
+    const MAX_TABLE_ROWS = 250; // for readability
+    const VR_LEVEL_FPM = 100; // |vertical rate| below this is "level"
+    const TRAIL_KM = 25; // trail length behind each aircraft
+
+    // USA bounding boxes (for region tag & airport bubbles)
+    const BOUNDS = {
+      CONUS: { minLat: 24.5, maxLat: 49.5, minLon: -125.0, maxLon: -66.9 },
+      AK:    { minLat: 51.0, maxLat: 71.0, minLon: -170.0, maxLon: -129.0 },
+      HI:    { minLat: 18.9, maxLat: 22.5, minLon: -160.5, maxLon: -154.5 },
+      PR:    { minLat: 17.7, maxLat: 18.6, minLon: -67.3,  maxLon: -65.2  },
+    };
+
+    // Very approximate continent bboxes
+    const CONTINENT_BBOX = {
+      NA: [{ minLat: 5, maxLat: 83, minLon: -170, maxLon: -20 }],
+      SA: [{ minLat: -60, maxLat: 15, minLon: -92, maxLon: -30 }],
+      EU: [{ minLat: 35, maxLat: 72, minLon: -25, maxLon: 45 }],
+      AF: [{ minLat: -35, maxLat: 37, minLon: -20, maxLon: 52 }],
+      AS: [ { minLat: 5, maxLat: 82, minLon: 26, maxLon: 180 }, { minLat: 5, maxLat: 82, minLon: -180, maxLon: -170 } ],
+      OC: [ { minLat: -50, maxLat: 0, minLon: 110, maxLon: 180 }, { minLat: -50, maxLat: 0, minLon: -180, maxLon: -160 } ]
+    };
+
+    const AIRLINE_PREFIX = { AAL:'American', DAL:'Delta', UAL:'United', SWA:'Southwest', NKS:'Spirit', FFT:'Frontier', AAY:'Allegiant', JBU:'JetBlue', ASA:'Alaska', SKW:'SkyWest', UCA:'CommutAir', RPA:'Republic', ENY:'Envoy', PDT:'Piedmont', JIA:'PSA', ASH:'Mesa', GTI:'Atlas', UPS:'UPS', FDX:'FedEx', CPA:'Cathay Cargo', QTR:'Qatar', UAE:'Emirates' };
+
+    // Major USA airports (for traffic bubbles)
+    const AIRPORTS = [
+      {icao:'KATL', name:'Atlanta (ATL)', lat:33.6407, lon:-84.4277},
+      {icao:'KDFW', name:'Dallas/Fort Worth (DFW)', lat:32.8998, lon:-97.0403},
+      {icao:'KDEN', name:'Denver (DEN)', lat:39.8561, lon:-104.6737},
+      {icao:'KORD', name:"Chicago O'Hare (ORD)", lat:41.9742, lon:-87.9073},
+      {icao:'KLAX', name:'Los Angeles (LAX)', lat:33.9416, lon:-118.4085},
+      {icao:'KCLT', name:'Charlotte (CLT)', lat:35.2140, lon:-80.9431},
+      {icao:'KMCO', name:'Orlando (MCO)', lat:28.4312, lon:-81.3081},
+      {icao:'KLAS', name:'Las Vegas (LAS)', lat:36.0840, lon:-115.1537},
+      {icao:'KPHX', name:'Phoenix (PHX)', lat:33.4343, lon:-112.0116},
+      {icao:'KSEA', name:'Seattle (SEA)', lat:47.4502, lon:-122.3088},
+      {icao:'KMIA', name:'Miami (MIA)', lat:25.7959, lon:-80.2870},
+      {icao:'KIAH', name:'Houston Bush (IAH)', lat:29.9902, lon:-95.3368},
+      {icao:'KJFK', name:'New York JFK (JFK)', lat:40.6413, lon:-73.7781},
+      {icao:'KEWR', name:'Newark (EWR)', lat:40.6895, lon:-74.1745},
+      {icao:'KSFO', name:'San Francisco (SFO)', lat:37.6213, lon:-122.3790},
+      {icao:'KMSP', name:'Minneapolis (MSP)', lat:44.8848, lon:-93.2223},
+      {icao:'KDTW', name:'Detroit (DTW)', lat:42.2162, lon:-83.3554},
+      {icao:'KBOS', name:'Boston (BOS)', lat:42.3656, lon:-71.0096},
+      {icao:'KPHL', name:'Philadelphia (PHL)', lat:39.8744, lon:-75.2424},
+      {icao:'KSLC', name:'Salt Lake City (SLC)', lat:40.7899, lon:-111.9791},
+      {icao:'KBWI', name:'Baltimore (BWI)', lat:39.1754, lon:-76.6684},
+      {icao:'KSAN', name:'San Diego (SAN)', lat:32.7338, lon:-117.1933},
+      {icao:'KTPA', name:'Tampa (TPA)', lat:27.9755, lon:-82.5332},
+      {icao:'KFLL', name:'Fort Lauderdale (FLL)', lat:26.0742, lon:-80.1506},
+      {icao:'KIAD', name:'Washington Dulles (IAD)', lat:38.9531, lon:-77.4565},
+      {icao:'KDCA', name:'Washington National (DCA)', lat:38.8512, lon:-77.0402},
+      {icao:'KMDW', name:'Chicago Midway (MDW)', lat:41.7868, lon:-87.7522},
+      {icao:'PHNL', name:'Honolulu (HNL)', lat:21.3245, lon:-157.9251},
+      {icao:'KPDX', name:'Portland (PDX)', lat:45.5898, lon:-122.5951},
+      {icao:'KSTL', name:'St. Louis (STL)', lat:38.7474, lon:-90.3591},
+      {icao:'KRDU', name:'Raleigh‑Durham (RDU)', lat:35.8801, lon:-78.7880},
+      {icao:'KAUS', name:'Austin (AUS)', lat:30.1975, lon:-97.6664},
+      {icao:'KSJC', name:'San Jose (SJC)', lat:37.3639, lon:-121.9289},
+      {icao:'KOAK', name:'Oakland (OAK)', lat:37.7126, lon:-122.2197},
+      {icao:'KSNA', name:'Orange County (SNA)', lat:33.6757, lon:-117.8678},
+      {icao:'KHOU', name:'Houston Hobby (HOU)', lat:29.6454, lon:-95.2789},
+      {icao:'KMKE', name:'Milwaukee (MKE)', lat:42.9472, lon:-87.8966},
+      {icao:'KSAT', name:'San Antonio (SAT)', lat:29.5337, lon:-98.4698},
+      {icao:'TJSJ', name:'San Juan (SJU)', lat:18.4394, lon:-66.0018},
+      {icao:'PANC', name:'Anchorage (ANC)', lat:61.1743, lon:-149.9982}
+    ];
+
+    // ====== State ======
+    let map, aircraftLayer, airportsLayer;
+    let sizeChart, carrierChart;
+    let lastData = [];
+
+    // ====== Helpers ======
+    const m2ft  = m=> m==null? null : m*3.28084;
+    const ms2kt = ms=> ms==null? null : ms*1.94384;
+    const ms2fpm= ms=> ms==null? null : ms*196.8504;
+
+    // Escape to prevent XSS when inserting strings into HTML
+    function escapeHTML(s){
+      if (s == null) return '';
+      return String(s).replace(/[&<>"'`]/g, (c)=>({
+        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;', '`':'&#96;'
+      })[c]);
+    }
+
+    function inBox(lat,lon,b){ return lat>=b.minLat && lat<=b.maxLat && lon>=b.minLon && lon<=b.maxLon; }
+    function inAnyBox(lat,lon,boxes){ return boxes.some(b=>inBox(lat,lon,b)); }
+    function regionOf(lat,lon){ if (inBox(lat,lon,BOUNDS.CONUS)) return 'CONUS'; if (inBox(lat,lon,BOUNDS.AK)) return 'AK'; if (inBox(lat,lon,BOUNDS.HI)) return 'HI'; if (inBox(lat,lon,BOUNDS.PR)) return 'PR'; return null; }
+    function continentOf(lat,lon){ for (const [k,boxes] of Object.entries(CONTINENT_BBOX)){ if (inAnyBox(lat,lon,boxes)) return k; } return null; }
+    function prefixOf(cs){ return cs? cs.trim().slice(0,3).toUpperCase() || 'UNK' : 'UNK'; }
+    function setStatus(text, level='ok'){ document.getElementById('status').textContent = text; const dot = document.getElementById('conn-dot'); dot.className = 'dot '+(level==='ok'?'ok':level==='warn'?'warn':'bad'); }
+    function saveCache(payload){ try{ localStorage.setItem('opensky_cache', JSON.stringify({t:Date.now(), payload})); }catch(e){} }
+    function loadCache(){
+      try{
+        const raw = localStorage.getItem('opensky_cache');
+        return raw ? JSON.parse(raw) : null;
+      }catch(e){
+        return null;
+      }
+    }
+
+    // Haversine distance (km)
+    function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180; const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+    // Destination from start, bearing deg, distance km
+    function destination(lat,lon,brgDeg,distKm){ const R=6371, brg=brgDeg*Math.PI/180, lat1=lat*Math.PI/180, lon1=lon*Math.PI/180, d=distKm/R; const lat2=Math.asin(Math.sin(lat1)*Math.cos(d)+Math.cos(lat1)*Math.sin(d)*Math.cos(brg)); const lon2=lon1+Math.atan2(Math.sin(brg)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2)); return [lat2*180/Math.PI, ((lon2*180/Math.PI+540)%360)-180]; }
+
+    // ====== Map ======
+    function initMap(){
+      // Default to USA view
+      map = L.map('map', { preferCanvas:true, worldCopyJump:true }).setView([39.5,-98.35], 4);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 10, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+      aircraftLayer = L.layerGroup().addTo(map);
+      airportsLayer = L.layerGroup().addTo(map);
+    }
+
+    function drawAircraftMarkers(rows){
+      aircraftLayer.clearLayers();
+      if (!document.getElementById('toggleAircraft').checked) return;
+      for (const r of rows){
+        const {lat, lon, callsign, alt_ft, spd_kt, vr_fpm, trk_deg} = r;
+        const color = vr_fpm==null? '#60a5fa' : (vr_fpm>VR_LEVEL_FPM? '#22c55e' : (vr_fpm<-VR_LEVEL_FPM? '#ef4444':'#f59e0b'));
+        const hdg = (trk_deg==null? 0 : trk_deg);
+        // Trail
+        try{ const [tlat,tlon] = destination(lat,lon,hdg+180,TRAIL_KM); L.polyline([[tlat,tlon],[lat,lon]], {weight:2, opacity:0.8, color}).addTo(aircraftLayer);}catch(e){}
+        // Pointer icon
+        const icon = L.divIcon({className:'', html:`<div class="arrow" style="border-bottom-color:${color}; transform:rotate(${hdg}deg)"></div>`, iconSize:[12,10], iconAnchor:[6,6]});
+        const m = L.marker([lat,lon], {icon});
+        m.bindPopup(
+        `<b>${escapeHTML(callsign || 'Unknown')}</b><br>`+
+        `Alt: ${alt_ft? Math.round(alt_ft).toLocaleString(): '–'} ft<br>`+
+        `Spd: ${spd_kt? Math.round(spd_kt): '–'} kt<br>`+
+        `VRate: ${vr_fpm? Math.round(vr_fpm): '–'} fpm<br>`+
+        `Hdg: ${trk_deg!=null? Math.round(trk_deg): '–'}°`
+      );
+        m.addTo(aircraftLayer);
+      }
+    }
+
+    function drawAirportIndicators(rows){
+      airportsLayer.clearLayers();
+      if (!document.getElementById('toggleAirports').checked) return;
+      const cont = document.getElementById('continent').value;
+      if (cont!=='ALL' && cont!=='NA') return; // show USA bubbles only when viewing NA or World
+      const pool = rows.filter(r=> r.region);
+      for (const ap of AIRPORTS){
+        let count=0; for (const f of pool){ if (haversine(ap.lat,ap.lon,f.lat,f.lon) <= 50) count++; }
+        const size = Math.min(28, 6 + Math.sqrt(count)*3);
+        const color = count<=5? '#22c55e' : (count<=15? '#f59e0b' : '#ef4444');
+        const bubble = L.circleMarker([ap.lat,ap.lon], {radius:size/2, weight:1, color:'#0b1220', fillColor:color, fillOpacity:0.7});
+        bubble.bindPopup(`<b>${ap.name}</b><br>Traffic nearby: <b>${count}</b>`).addTo(airportsLayer);
+      }
+    }
+
+    // ====== Charts ======
+    function renderSizeChart(bins){ if (typeof Chart==='undefined') return; if (sizeChart) sizeChart.destroy(); const ctx=document.getElementById('sizeChart'); sizeChart=new Chart(ctx,{ type:'bar', data:{ labels:bins.labels, datasets:[{label:'Flights', data:bins.counts}] }, options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{beginAtZero:true} }, plugins:{ legend:{display:false} } } }); }
+    function renderCarrierChart(counts){ if (typeof Chart==='undefined') return; if (carrierChart) carrierChart.destroy(); const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,10); const labels=entries.map(([k,_])=> AIRLINE_PREFIX[k]?`${AIRLINE_PREFIX[k]} (${k})`:k); const data=entries.map(([,v])=>v); const ctx=document.getElementById('carrierChart'); carrierChart=new Chart(ctx,{ type:'bar', data:{labels, datasets:[{label:'Flights', data}]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, scales:{ x:{beginAtZero:true} } } }); }
+
+    // ====== UI Fill ======
+    function fillTable(rows){
+      const tbody = document.getElementById('rows');
+      tbody.textContent = '';
+      for (const r of rows.slice(0, MAX_TABLE_ROWS)){
+        const tr = document.createElement('tr');
+        const cells = [
+          r.callsign || 'unknown',
+          r.icao24 || '',
+          r.country || '',
+          r.alt_ft? Math.round(r.alt_ft).toLocaleString(): '–',
+          r.spd_kt? Math.round(r.spd_kt): '–',
+          r.vr_fpm? Math.round(r.vr_fpm): '–',
+          r.trk_deg!=null? Math.round(r.trk_deg): '–',
+          r.region || '—'
+        ];
+        for (const v of cells){ const td=document.createElement('td'); td.textContent = v; tr.appendChild(td); }
+        tbody.appendChild(tr);
+      }
+    }
+
+    function median(arr){ const a=arr.slice().sort((x,y)=>x-y); if(!a.length) return null; const m=Math.floor(a.length/2); return a.length%2? a[m] : (a[m-1]+a[m])/2; }
+
+    function updateKPIs(rows){
+      const alt=rows.map(r=>r.alt_ft).filter(x=>x!=null), spd=rows.map(r=>r.spd_kt).filter(x=>x!=null);
+      const total=rows.length;
+      const avgAlt=Math.round(alt.reduce((a,b)=>a+b,0)/Math.max(1,alt.length));
+      const avgSpd=Math.round(spd.reduce((a,b)=>a+b,0)/Math.max(1,spd.length));
+      const medAlt=Math.round(median(alt)||0), medSpd=Math.round(median(spd)||0);
+      const climb=rows.filter(r=>(r.vr_fpm||0)>VR_LEVEL_FPM).length,
+            desc =rows.filter(r=>(r.vr_fpm||0)<-VR_LEVEL_FPM).length,
+            level=total-climb-desc;
+      const usReg=rows.filter(r=>(r.country||'').toLowerCase().includes('united states')).length,
+            other=total-usReg;
+      const east=rows.filter(r=>r.trk_deg!=null && r.trk_deg<180).length,
+            west=rows.filter(r=>r.trk_deg!=null && r.trk_deg>=180).length;
+      document.getElementById('kpi-total').textContent=total.toLocaleString();
+      document.getElementById('kpi-alt').textContent=isFinite(avgAlt)?avgAlt.toLocaleString():'–';
+      document.getElementById('kpi-spd').textContent=isFinite(avgSpd)?avgSpd.toLocaleString():'–';
+      document.getElementById('kpi-vr').textContent=`${climb}/${level}/${desc}`;
+      document.getElementById('kpi-medalt').textContent=medAlt?medAlt.toLocaleString():'–';
+      document.getElementById('kpi-medspd').textContent=medSpd?medSpd.toLocaleString():'–';
+      document.getElementById('kpi-regsplit').textContent=`${usReg}/${other}`;
+      document.getElementById('kpi-ew').textContent=`${east}/${west}`;
+    }
+
+    function computeSizeDist(rows){ let small=0, medium=0, large=0; for (const r of rows){ const v=r.spd_kt||0, a=r.alt_ft||0; if (v<180 && a<8000) small++; else if (v>380 || a>=20000) large++; else medium++; } return {labels:['Small','Medium','Large'], counts:[small,medium,large]}; }
+
+    function computeCarrierCounts(rows){ const map={}; for (const r of rows){ const p=prefixOf(r.callsign); map[p]=(map[p]||0)+1; } return map; }
+
+    function populateCarrierFilter(counts){ const sel=document.getElementById('carrier'); const prev=sel.value||'ALL'; const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]); const opts=[`<option value="ALL">All carriers</option>`]; for(const [k,v] of sorted){ const label=AIRLINE_PREFIX[k]?`${AIRLINE_PREFIX[k]} (${k})`:k; opts.push(`<option value="${k}">${label} – ${v}</option>`);} sel.innerHTML=opts.join(''); if(prev!=='ALL' && !sorted.some(([k])=>k===prev)){ const opt=document.createElement('option'); const label=AIRLINE_PREFIX[prev]?`${AIRLINE_PREFIX[prev]} (${prev})`:prev; opt.value=prev; opt.textContent=`${label} – ${counts[prev]||0}`; sel.appendChild(opt);} sel.value=prev; }
+
+    function applyFilters(rows){ const q=document.getElementById('search').value.trim().toUpperCase(); const carrierSel=document.getElementById('carrier').value; const contSel=document.getElementById('continent').value; return rows.filter(r=>{ if(q && !(r.callsign||'').toUpperCase().includes(q)) return false; if(contSel!=='ALL'){ const c=continentOf(r.lat,r.lon); if(c!==contSel) return false; } if(carrierSel!=='ALL' && prefixOf(r.callsign)!==carrierSel) return false; return true; }); }
+
+    // ====== Fetch & Transform ======
+    async function fetchStates(){
+      const candidates = [
+        API_URL,
+        'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_URL),
+        'https://cors.isomorphic-git.org/' + API_URL
+      ];
+      let lastErr;
+      for (const url of candidates){
+        try{
+          const ctrl = new AbortController();
+          const t = setTimeout(()=>ctrl.abort(), 15000);
+          const resp = await fetch(url, { signal: ctrl.signal });
+          clearTimeout(t);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return await resp.json();
+        }catch(e){
+          lastErr = e;
+          console.warn('Fetch candidate failed:', url, e.message);
+          continue;
+        }
+      }
+      throw lastErr || new Error('Failed to fetch states');
+    }
+
+    function transform(data){ const out=[]; const states=data.states||[]; for (const s of states){ const [icao24,callsign,country,tpos,tlast,lon,lat,baro_alt,on_ground,vel,track,vrate,sensors,geo_alt] = s; if(lat==null||lon==null) continue; if(on_ground) continue; out.push({ icao24, callsign:callsign?callsign.trim():'', country, lat, lon, alt_ft:m2ft(geo_alt!=null?geo_alt:baro_alt), spd_kt:ms2kt(vel), vr_fpm:ms2fpm(vrate), trk_deg:track, region:regionOf(lat,lon) }); } return out; }
+
+    function updateUI(rowsAll){ const contSel=document.getElementById('continent').value; const label=contSel==='ALL'?'Airborne worldwide':`Airborne in ${contSel}`; document.getElementById('kpi-scope-label').textContent=label; document.getElementById('lastUpdate').textContent=new Date().toLocaleString(); const rows=applyFilters(rowsAll); updateKPIs(rows); try{ renderSizeChart(computeSizeDist(rows)); }catch(e){ console.error('size chart',e);} let carrierCounts={}; try{ carrierCounts=computeCarrierCounts(rows); renderCarrierChart(carrierCounts);}catch(e){ console.error('carrier chart',e);} try{ populateCarrierFilter(carrierCounts);}catch(e){ console.error('carrier filter',e);} fillTable(rows); drawAircraftMarkers(rows); drawAirportIndicators(rowsAll); }
+
+    async function refresh(){ setStatus('Fetching OpenSky…','warn'); try{ const data=await fetchStates(); const rows=transform(data); lastData=rows; saveCache(rows); updateUI(rows); const n=applyFilters(rows).length; setStatus(`Live · ${n.toLocaleString()} flights (filtered)`, 'ok'); }catch(err){ console.error(err); const cache=loadCache(); if(cache && cache.payload){ lastData=cache.payload; updateUI(lastData); const ageMin=Math.round((Date.now()-cache.t)/60000); setStatus(`Offline · showing cached data (${ageMin} min old)`, 'warn'); }else{ setStatus(`Error: ${err.message}. If running as file://, serve via a local web server (e.g., \`python -m http.server\`).`, 'bad'); } } }
+
+    function schedule(){ setInterval(refresh, REFRESH_MS); }
+
+    // ====== Boot ======
+    window.addEventListener('DOMContentLoaded', ()=>{
+      initMap();
+      if (location.protocol === 'file:') setStatus('Running from local file: map OK, but live data may need a local web server (try "python -m http.server").','warn');
+      refresh();
+      schedule();
+      // UI events
+      document.getElementById('refreshBtn').addEventListener('click', ()=>refresh());
+      document.getElementById('search').addEventListener('input', ()=>updateUI(lastData||[]));
+      document.getElementById('continent').addEventListener('change', ()=>updateUI(lastData||[]));
+      document.getElementById('carrier').addEventListener('change', ()=>updateUI(lastData||[]));
+      document.getElementById('toggleAircraft').addEventListener('change', ()=>drawAircraftMarkers(applyFilters(lastData||[])));
+      document.getElementById('toggleAirports').addEventListener('change', ()=>drawAirportIndicators(lastData||[]));
+    });
+
+    // Surface JS errors to the status bar for quick debugging
+    window.addEventListener('error', (e)=>{ if (!e || !e.message) return; setStatus('Error: ' + e.message, 'bad'); });
+  </script>
+</body>
+</html>
